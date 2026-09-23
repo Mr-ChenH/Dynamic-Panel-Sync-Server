@@ -1,0 +1,20 @@
+node_modules/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+.DS_Store
+.vscode/
+.idea/
+.cache/
+.pi/
+.worktrees/
+*.swp
+
+# Runtime data and local secrets
+objects/
+backups/
+secrets/*
+!secrets/.gitkeep
