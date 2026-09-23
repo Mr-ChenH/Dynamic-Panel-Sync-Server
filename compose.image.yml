@@ -1,3 +1,7 @@
+x-runtime-paths: &runtime_paths
+  DP_OBJECT_PATH: &object_path /var/lib/dynamic-panel/objects
+  DP_BACKUP_PATH: &backup_path /var/lib/dynamic-panel/backups
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -21,9 +25,7 @@ services:
     pull_policy: always
     restart: unless-stopped
     env_file: .env
-    environment:
-      DP_OBJECT_PATH: /var/lib/dynamic-panel/objects
-      DP_BACKUP_PATH: /var/lib/dynamic-panel/backups
+    environment: *runtime_paths
     secrets:
       - postgres_password
     depends_on:
@@ -38,17 +40,19 @@ services:
     ports:
       - "127.0.0.1:43822:43822"
     volumes:
-      - object-data:/var/lib/dynamic-panel/objects
-      - backup-data:/var/lib/dynamic-panel/backups
+      - type: volume
+        source: object-data
+        target: *object_path
+      - type: volume
+        source: backup-data
+        target: *backup_path
 
   backup-worker:
     image: ${DP_SYNC_IMAGE:-ghcr.io/mr-chenh/dynamic-panel-sync-server:latest}
     pull_policy: always
     restart: unless-stopped
     env_file: .env
-    environment:
-      DP_OBJECT_PATH: /var/lib/dynamic-panel/objects
-      DP_BACKUP_PATH: /var/lib/dynamic-panel/backups
+    environment: *runtime_paths
     secrets:
       - postgres_password
     healthcheck:
@@ -65,8 +69,13 @@ services:
         "export DATABASE_URL=postgresql://dynamic_panel:$$(cat /run/secrets/postgres_password)@postgres:5432/dynamic_panel; npm run worker",
       ]
     volumes:
-      - object-data:/var/lib/dynamic-panel/objects:ro
-      - backup-data:/var/lib/dynamic-panel/backups
+      - type: volume
+        source: object-data
+        target: *object_path
+        read_only: true
+      - type: volume
+        source: backup-data
+        target: *backup_path
 
 volumes:
   postgres-data:

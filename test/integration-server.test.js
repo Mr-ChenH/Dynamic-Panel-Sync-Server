@@ -10,6 +10,14 @@ import { buildServer, startServer } from '../src/server.js';
 const SECRET = 'integration-secret-with-at-least-32-bytes';
 const config = () => loadConfig({ NODE_ENV: 'test', COOKIE_SECRET: SECRET, KEY_LOOKUP_SECRET: `${SECRET}-lookup`, CURSOR_SECRET: `${SECRET}-cursor` });
 
+function assertCentralizedRuntimePaths(compose, worker) {
+  assert.equal(compose.split('/var/lib/dynamic-panel/objects').length - 1, 1);
+  assert.equal(compose.split('/var/lib/dynamic-panel/backups').length - 1, 1);
+  assert.equal(compose.match(/environment: \*runtime_paths/g)?.length, 2);
+  assert.match(worker, /source: object-data\s+target: \*object_path\s+read_only: true/);
+  assert.match(worker, /source: backup-data\s+target: \*backup_path/);
+}
+
 test('composed server injects health and strict-CSP console assets', async (t) => {
   const app = await buildServer({ config: config(), logger: false });
   t.after(() => app.close());
@@ -56,7 +64,7 @@ test('example production topology waits for a healthy API and disables worker HT
   const compose = await readFile(path.join(root, 'compose.example.yml'), 'utf8');
   const worker = compose.slice(compose.indexOf('  backup-worker:'), compose.indexOf('\nvolumes:'));
   assert.match(worker, /npm run worker/);
-  assert.match(worker, /backup-data:\/var\/lib\/dynamic-panel\/backups/);
+  assertCentralizedRuntimePaths(compose, worker);
   assert.match(worker, /healthcheck:\s+disable: true/);
   assert.match(worker, /sync-server:\s+condition: service_healthy/);
   assert.doesNotMatch(worker, /condition: service_started/);
@@ -72,6 +80,7 @@ test('registry production topology pulls the published image without a local bui
   assert.doesNotMatch(compose, /^\s+build:/m);
   assert.match(compose, /npm run migrate && npm start/);
   assert.match(worker, /npm run worker/);
+  assertCentralizedRuntimePaths(compose, worker);
   assert.match(worker, /healthcheck:\s+disable: true/);
   assert.match(worker, /sync-server:\s+condition: service_healthy/);
 });
