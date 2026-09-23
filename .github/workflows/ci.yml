@@ -73,7 +73,7 @@ jobs:
           trap 'docker compose -f compose.example.yml down --volumes --remove-orphans' EXIT
           docker compose -f compose.example.yml up --build --detach 2>&1 | tee .compose-up.log
           for attempt in $(seq 1 90); do
-            if curl --fail --silent --show-error http://127.0.0.1:43822/api/v1/health/live; then
+            if curl --fail --silent --show-error --header 'X-Forwarded-Proto: https' http://127.0.0.1:43822/api/v1/health/live; then
               break
             fi
             if [ "$attempt" -eq 90 ]; then
