@@ -59,8 +59,21 @@ jobs:
           sed -i 's/^KEY_LOOKUP_SECRET=$/KEY_LOOKUP_SECRET=compose-ci-lookup-secret-at-least-32-bytes/' .env
           sed -i 's/^CURSOR_SECRET=$/CURSOR_SECRET=compose-ci-cursor-secret-at-least-32-bytes/' .env
           trap 'docker compose -f compose.example.yml down --volumes --remove-orphans' EXIT
-          docker compose -f compose.example.yml up --build --detach --wait --wait-timeout 180
-          curl --fail --silent --show-error http://127.0.0.1:43822/api/v1/health/live
+          docker compose -f compose.example.yml up --build --detach
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent --show-error http://127.0.0.1:43822/api/v1/health/live; then
+              break
+            fi
+            if [ "$attempt" -eq 90 ]; then
+              docker compose -f compose.example.yml ps
+              docker compose -f compose.example.yml logs --no-color
+              exit 1
+            fi
+            sleep 2
+          done
+          docker compose -f compose.example.yml ps --services --status running | grep -qx postgres
+          docker compose -f compose.example.yml ps --services --status running | grep -qx sync-server
+          docker compose -f compose.example.yml ps --services --status running | grep -qx backup-worker
 
   publish-image:
     if: github.event_name != 'pull_request'
