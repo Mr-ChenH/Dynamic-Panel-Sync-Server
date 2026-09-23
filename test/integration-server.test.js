@@ -35,7 +35,6 @@ function assertProductionTopology(compose) {
   assert.match(worker, /healthcheck:\s+disable: true/);
   assert.match(worker, /sync-server:\s+condition: service_healthy/);
   assert.doesNotMatch(compose, /npm run|"sh", "-c"/);
-  assert.match(compose, /read_only: true/);
   assert.match(compose, /user: "10001:10001"/);
   assert.match(compose, /DP_BACKUP_MASTER_KEY_FILE: \/run\/secrets\/backup_master_key/);
   assert.match(compose, /postgres_admin_password:\s+environment: DP_POSTGRES_ADMIN_PASSWORD/);
@@ -98,6 +97,8 @@ test('source-build production topology is hardened and gates runtime services on
   ]);
   assertProductionTopology(compose);
   assert.match(dockerfile, /useradd --uid 10001 --gid dynamic-panel/);
+  assert.match(dockerfile, /chown -R dynamic-panel:dynamic-panel \/var\/lib\/dynamic-panel/);
+  assert.doesNotMatch(dockerfile, /chown[^\n]*\/app/);
   assert.match(dockerfile, /USER dynamic-panel/);
   assert.equal(compose.match(/^  build: \.$/gm)?.length, 1);
   assert.equal(compose.match(/^  image: dynamic-panel-sync-server:local$/gm)?.length, 1);

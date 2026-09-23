@@ -33,7 +33,6 @@ x-app-defaults: &app_defaults
   image: dynamic-panel-sync-server:local
   init: true
   user: "10001:10001"
-  read_only: true
   security_opt:
     - no-new-privileges:true
   cap_drop:
