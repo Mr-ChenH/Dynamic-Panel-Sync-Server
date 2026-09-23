@@ -58,6 +58,18 @@ jobs:
           sed -i 's/^COOKIE_SECRET=$/COOKIE_SECRET=compose-ci-cookie-secret-at-least-32-bytes/' .env
           sed -i 's/^KEY_LOOKUP_SECRET=$/KEY_LOOKUP_SECRET=compose-ci-lookup-secret-at-least-32-bytes/' .env
           sed -i 's/^CURSOR_SECRET=$/CURSOR_SECRET=compose-ci-cursor-secret-at-least-32-bytes/' .env
+          diagnose() {
+            code=$?
+            trap - ERR
+            set +e
+            diagnostics="$(docker compose -f compose.example.yml ps --all 2>&1; docker compose -f compose.example.yml logs --no-color --tail 30 2>&1)"
+            diagnostics="${diagnostics//'%'/'%25'}"
+            diagnostics="${diagnostics//$'\r'/'%0D'}"
+            diagnostics="${diagnostics//$'\n'/'%0A'}"
+            echo "::error file=compose.example.yml,title=Compose smoke diagnostics::$diagnostics"
+            exit "$code"
+          }
+          trap diagnose ERR
           trap 'docker compose -f compose.example.yml down --volumes --remove-orphans' EXIT
           docker compose -f compose.example.yml up --build --detach
           for attempt in $(seq 1 90); do
