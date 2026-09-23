@@ -53,6 +53,14 @@ jobs:
           cp .env.example .env
           docker compose -f compose.example.yml config --quiet
           docker compose -f compose.image.yml config --quiet
+      - name: Smoke test Docker Compose stack
+        run: |
+          sed -i 's/^COOKIE_SECRET=$/COOKIE_SECRET=compose-ci-cookie-secret-at-least-32-bytes/' .env
+          sed -i 's/^KEY_LOOKUP_SECRET=$/KEY_LOOKUP_SECRET=compose-ci-lookup-secret-at-least-32-bytes/' .env
+          sed -i 's/^CURSOR_SECRET=$/CURSOR_SECRET=compose-ci-cursor-secret-at-least-32-bytes/' .env
+          trap 'docker compose -f compose.example.yml down --volumes --remove-orphans' EXIT
+          docker compose -f compose.example.yml up --build --detach --wait --wait-timeout 180
+          curl --fail --silent --show-error http://127.0.0.1:43822/api/v1/health/live
 
   publish-image:
     if: github.event_name != 'pull_request'
