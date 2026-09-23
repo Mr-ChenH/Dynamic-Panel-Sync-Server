@@ -59,7 +59,7 @@ jobs:
           sed -i 's/^KEY_LOOKUP_SECRET=$/KEY_LOOKUP_SECRET=compose-ci-lookup-secret-at-least-32-bytes/' .env
           sed -i 's/^CURSOR_SECRET=$/CURSOR_SECRET=compose-ci-cursor-secret-at-least-32-bytes/' .env
           diagnose() {
-            code=$?
+            code="${1:-1}"
             trap - ERR
             set +e
             diagnostics="$(tail -n 40 .compose-up.log 2>/dev/null; docker compose -f compose.example.yml ps --all 2>&1; docker inspect --format '{{.Name}} status={{.State.Status}} error={{.State.Error}} exit={{.State.ExitCode}}' $(docker compose -f compose.example.yml ps --all --quiet) 2>&1; docker compose -f compose.example.yml logs --no-color --tail 10 2>&1)"
@@ -77,9 +77,7 @@ jobs:
               break
             fi
             if [ "$attempt" -eq 90 ]; then
-              docker compose -f compose.example.yml ps
-              docker compose -f compose.example.yml logs --no-color
-              exit 1
+              diagnose
             fi
             sleep 2
           done
