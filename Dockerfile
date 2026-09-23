@@ -8,7 +8,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY src ./src
 COPY migrations ./migrations
 
-RUN groupadd --system dynamic-panel && useradd --system --gid dynamic-panel --home /app dynamic-panel \
+RUN groupadd --gid 10001 dynamic-panel && useradd --uid 10001 --gid dynamic-panel --home-dir /app --no-create-home --shell /usr/sbin/nologin dynamic-panel \
     && mkdir -p /var/lib/dynamic-panel/objects /var/lib/dynamic-panel/backups \
     && chown -R dynamic-panel:dynamic-panel /app /var/lib/dynamic-panel
 USER dynamic-panel

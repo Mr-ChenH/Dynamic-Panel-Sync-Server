@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { resolveDatabaseUrl } from './db/connection-config.js';
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -28,6 +29,7 @@ export function loadConfig(env = process.env) {
   const developmentSecret = 'development-only-secret-change-me-32';
   const parsed = schema.parse({
     ...env,
+    DATABASE_URL: resolveDatabaseUrl(env),
     COOKIE_SECRET: env.COOKIE_SECRET ?? (env.NODE_ENV === 'production' ? undefined : developmentSecret),
     KEY_LOOKUP_SECRET: env.KEY_LOOKUP_SECRET ?? (env.NODE_ENV === 'production' ? undefined : developmentSecret),
     CURSOR_SECRET: env.CURSOR_SECRET ?? (env.NODE_ENV === 'production' ? undefined : `${developmentSecret}-cursor`)

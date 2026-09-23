@@ -2,6 +2,7 @@ node_modules
 .git
 .env
 .env.*
+.compose.env
 coverage
 objects
 backups

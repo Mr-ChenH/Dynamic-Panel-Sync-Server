@@ -1,6 +1,46 @@
-x-runtime-paths: &runtime_paths
+x-runtime-environment: &runtime_environment
+  NODE_ENV: production
+  HOST: 0.0.0.0
+  PORT: &container_port 43822
+  DATABASE_URL: ""
+  DATABASE_HOST: postgres
+  DATABASE_PORT: 5432
+  DATABASE_NAME: dynamic_panel
+  DATABASE_USER: dynamic_panel_app
+  DATABASE_PASSWORD_FILE: /run/secrets/postgres_app_password
+  DP_BACKUP_MASTER_KEY: ""
+  DP_BACKUP_MASTER_KEY_FILE: /run/secrets/backup_master_key
   DP_OBJECT_PATH: &object_path /var/lib/dynamic-panel/objects
   DP_BACKUP_PATH: &backup_path /var/lib/dynamic-panel/backups
+
+x-setup-environment: &setup_environment
+  DATABASE_URL: ""
+  DATABASE_HOST: postgres
+  DATABASE_PORT: 5432
+  DATABASE_NAME: dynamic_panel
+  DATABASE_USER: dynamic_panel_admin
+  DATABASE_PASSWORD_FILE: /run/secrets/postgres_admin_password
+  DATABASE_APP_PASSWORD_FILE: /run/secrets/postgres_app_password
+
+x-default-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app-defaults: &app_defaults
+  image: ${DP_SYNC_IMAGE:-ghcr.io/mr-chenh/dynamic-panel-sync-server:latest}
+  pull_policy: always
+  init: true
+  user: "10001:10001"
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  logging: *default_logging
 
 services:
   postgres:
@@ -8,37 +48,72 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: dynamic_panel
-      POSTGRES_USER: dynamic_panel
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_USER: dynamic_panel_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
     secrets:
-      - postgres_password
+      - source: postgres_admin_password
+        target: postgres_admin_password
+        mode: 0400
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dynamic_panel -d dynamic_panel"]
+      test: ["CMD-SHELL", "pg_isready -U dynamic_panel_admin -d dynamic_panel"]
       interval: 10s
       timeout: 5s
       retries: 10
+    stop_grace_period: 1m
+    logging: *default_logging
 
-  sync-server:
-    image: ${DP_SYNC_IMAGE:-ghcr.io/mr-chenh/dynamic-panel-sync-server:latest}
-    pull_policy: always
-    restart: unless-stopped
-    env_file: .env
-    environment: *runtime_paths
+  database-setup:
+    <<: *app_defaults
+    restart: "no"
+    environment: *setup_environment
     secrets:
-      - postgres_password
+      - source: postgres_admin_password
+        target: postgres_admin_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: postgres_app_password
+        target: postgres_app_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
     depends_on:
       postgres:
         condition: service_healthy
-    command:
-      [
-        "sh",
-        "-c",
-        "export DATABASE_URL=postgresql://dynamic_panel:$$(cat /run/secrets/postgres_password)@postgres:5432/dynamic_panel; npm run migrate && npm start",
-      ]
+    command: ["node", "src/db/setup.js"]
+    healthcheck:
+      disable: true
+    stop_grace_period: 2m
+
+  sync-server:
+    <<: *app_defaults
+    restart: unless-stopped
+    env_file: .env
+    environment: *runtime_environment
+    secrets:
+      - source: postgres_app_password
+        target: postgres_app_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: backup_master_key
+        target: backup_master_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    depends_on:
+      postgres:
+        condition: service_healthy
+      database-setup:
+        condition: service_completed_successfully
+    command: ["node", "src/server.js"]
     ports:
-      - "127.0.0.1:43822:43822"
+      - target: *container_port
+        published: ${DP_BIND_PORT:-43822}
+        host_ip: ${DP_BIND_ADDRESS:-127.0.0.1}
+        protocol: tcp
     volumes:
       - type: volume
         source: object-data
@@ -46,15 +121,24 @@ services:
       - type: volume
         source: backup-data
         target: *backup_path
+    stop_grace_period: 2m
 
   backup-worker:
-    image: ${DP_SYNC_IMAGE:-ghcr.io/mr-chenh/dynamic-panel-sync-server:latest}
-    pull_policy: always
+    <<: *app_defaults
     restart: unless-stopped
     env_file: .env
-    environment: *runtime_paths
+    environment: *runtime_environment
     secrets:
-      - postgres_password
+      - source: postgres_app_password
+        target: postgres_app_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: backup_master_key
+        target: backup_master_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
     healthcheck:
       disable: true
     depends_on:
@@ -62,12 +146,7 @@ services:
         condition: service_healthy
       sync-server:
         condition: service_healthy
-    command:
-      [
-        "sh",
-        "-c",
-        "export DATABASE_URL=postgresql://dynamic_panel:$$(cat /run/secrets/postgres_password)@postgres:5432/dynamic_panel; npm run worker",
-      ]
+    command: ["node", "src/worker.js"]
     volumes:
       - type: volume
         source: object-data
@@ -76,6 +155,7 @@ services:
       - type: volume
         source: backup-data
         target: *backup_path
+    stop_grace_period: 10m
 
 volumes:
   postgres-data:
@@ -83,5 +163,9 @@ volumes:
   backup-data:
 
 secrets:
-  postgres_password:
-    file: ./secrets/postgres_password
+  postgres_admin_password:
+    environment: DP_POSTGRES_ADMIN_PASSWORD
+  postgres_app_password:
+    environment: DP_POSTGRES_APP_PASSWORD
+  backup_master_key:
+    environment: DP_BACKUP_MASTER_KEY

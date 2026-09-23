@@ -8,36 +8,42 @@ The account console authenticates only with the `HttpOnly`, `Secure`, `SameSite=
 
 ## Docker Compose
 
-For a registry-backed deployment, create the local configuration and PostgreSQL secret first:
+For a registry-backed deployment, create separate runtime and Compose-time configuration files:
 
 ```bash
 cp .env.example .env
-mkdir -p secrets
-openssl rand -hex 32 > secrets/postgres_password
+cp .compose.env.example .compose.env
+chmod 600 .env .compose.env
 ```
 
-Replace every required empty value in `.env`, then validate, pull, and start the stack:
+Replace every required empty value in both files. Generate independent PostgreSQL passwords and a backup key, for example with `openssl rand -hex 32` and `openssl rand -base64 32`. Then validate, pull, and start the stack:
 
 ```bash
-docker compose -f compose.image.yml config
-docker compose -f compose.image.yml pull
-docker compose -f compose.image.yml up -d
+docker compose --env-file .compose.env -f compose.image.yml config
+docker compose --env-file .compose.env -f compose.image.yml pull
+docker compose --env-file .compose.env -f compose.image.yml up -d
 ```
 
-`compose.image.yml` pulls `ghcr.io/mr-chenh/dynamic-panel-sync-server:latest` by default and does not require a local source build. For production, set `DP_SYNC_IMAGE` in `.env` to a release tag such as `ghcr.io/mr-chenh/dynamic-panel-sync-server:0.2.0`, or preferably to an immutable digest. Run `docker compose -f compose.image.yml pull` followed by `docker compose -f compose.image.yml up -d` to deploy an updated image.
+`compose.image.yml` pulls `ghcr.io/mr-chenh/dynamic-panel-sync-server:latest` by default and does not require a local source build. For production, set `DP_SYNC_IMAGE` in `.compose.env` to a release tag such as `ghcr.io/mr-chenh/dynamic-panel-sync-server:0.2.0`, or preferably to an immutable digest. Run the `pull` and `up -d` commands above to deploy an updated image.
 
 To build the image from a local source checkout instead, use:
 
 ```bash
-docker compose -f compose.example.yml config
-docker compose -f compose.example.yml up --build -d
+docker compose --env-file .compose.env -f compose.example.yml config
+docker compose --env-file .compose.env -f compose.example.yml up --build -d
 ```
 
-Both examples bind the API to loopback so a host TLS proxy can front it. They run a separate `backup-worker` service from the same image and environment; keep exactly one worker replica so a scheduled run is not duplicated. Compose waits for the API container to become healthy before starting the worker, which ensures migrations and server startup have completed, and disables the image's inherited HTTP healthcheck for the worker because it does not listen on an HTTP port. The worker starts one immediate backup, then defaults to 02:00 UTC daily and can be configured with `DP_BACKUP_HOUR_UTC` and `DP_BACKUP_MINUTE_UTC`. Failed immediate or scheduled runs retry after `DP_BACKUP_RETRY_SECONDS` (60 seconds by default, valid range 1-3600); retries continue at that interval until one succeeds, then scheduling returns to the next daily UTC slot. They deliberately use different volumes for online objects and backups, with the worker mounting online objects read-only. Filesystem backup health reports a same-fault-domain warning until `DP_BACKUP_INDEPENDENT_MEDIA=true` is set after the operator has verified that the backup mount is independent.
+Both examples bind the API to loopback by default so a host TLS proxy can front it; `DP_BIND_ADDRESS` and `DP_BIND_PORT` in `.compose.env` control that host binding without changing the fixed container port. Compose-time database passwords and the backup master key are projected as mode `0400` files owned by the fixed non-root application UID; `.compose.env` itself is never passed through the services' `env_file`.
+
+They run a one-shot `database-setup` service before the API. That service alone receives the PostgreSQL administrator secret, creates or updates the non-superuser `dynamic_panel_app` role, applies transactional migrations, and grants runtime data access. The API, worker, and management CLI receive only the application-role secret, so PostgreSQL RLS cannot be bypassed by their connection role.
+
+The long-running application containers use a read-only root filesystem, drop Linux capabilities, enable `no-new-privileges`, rotate Docker JSON logs, and run Node directly for correct signal handling. A separate `backup-worker` uses the same image and environment; keep exactly one worker replica so a scheduled run is not duplicated. Compose waits for the API container to become healthy before starting the worker and disables the image's inherited HTTP healthcheck for non-HTTP services. The worker starts one immediate backup, then defaults to 02:00 UTC daily and can be configured with `DP_BACKUP_HOUR_UTC` and `DP_BACKUP_MINUTE_UTC`. Failed immediate or scheduled runs retry after `DP_BACKUP_RETRY_SECONDS` (60 seconds by default, valid range 1-3600); retries continue at that interval until one succeeds, then scheduling returns to the next daily UTC slot. The examples deliberately use different volumes for online objects and backups, with the worker mounting online objects read-only. Filesystem backup health reports a same-fault-domain warning until `DP_BACKUP_INDEPENDENT_MEDIA=true` is set after the operator has verified that the backup mount is independent.
 
 ## PostgreSQL
 
-Run `npm run migrate` before each new server version. Migrations are transactional and tracked in `schema_migrations`. The server never runs migrations implicitly. Use a restricted application database role in production and gate PostgreSQL integration tests behind an operator-provided test URL.
+Outside Compose, run `npm run migrate` before each new server version. Migrations are transactional and tracked in `schema_migrations`; the server never runs them implicitly. Use a migration identity separately from a restricted runtime identity.
+
+Compose enforces that split automatically: `dynamic_panel_admin` is confined to PostgreSQL and the one-shot `database-setup` service, while `dynamic_panel_app` is explicitly created without superuser, role-creation, replication, or `BYPASSRLS` privileges. Database passwords are read from files and URI-encoded by the application, so generated or operator-selected passwords are not interpolated through a shell command. Gate PostgreSQL integration tests behind an operator-provided test URL.
 
 ## S3-compatible storage
 

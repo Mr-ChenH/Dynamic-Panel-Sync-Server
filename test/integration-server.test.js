@@ -10,12 +10,43 @@ import { buildServer, startServer } from '../src/server.js';
 const SECRET = 'integration-secret-with-at-least-32-bytes';
 const config = () => loadConfig({ NODE_ENV: 'test', COOKIE_SECRET: SECRET, KEY_LOOKUP_SECRET: `${SECRET}-lookup`, CURSOR_SECRET: `${SECRET}-cursor` });
 
-function assertCentralizedRuntimePaths(compose, worker) {
+function serviceSection(compose, name, next) {
+  return compose.slice(compose.indexOf(`  ${name}:`), compose.indexOf(`\n  ${next}:`));
+}
+
+function assertProductionTopology(compose) {
+  const setup = serviceSection(compose, 'database-setup', 'sync-server');
+  const server = serviceSection(compose, 'sync-server', 'backup-worker');
+  const worker = compose.slice(compose.indexOf('  backup-worker:'), compose.indexOf('\nvolumes:'));
   assert.equal(compose.split('/var/lib/dynamic-panel/objects').length - 1, 1);
   assert.equal(compose.split('/var/lib/dynamic-panel/backups').length - 1, 1);
-  assert.equal(compose.match(/environment: \*runtime_paths/g)?.length, 2);
+  assert.equal(compose.match(/environment: \*runtime_environment/g)?.length, 2);
+  assert.equal(compose.match(/<<: \*app_defaults/g)?.length, 3);
+  assert.match(compose, /POSTGRES_USER: dynamic_panel_admin/);
+  assert.match(compose, /DATABASE_USER: dynamic_panel_app/);
+  assert.match(setup, /command: \["node", "src\/db\/setup\.js"\]/);
+  assert.match(setup, /postgres_admin_password/);
+  assert.match(server, /database-setup:\s+condition: service_completed_successfully/);
+  assert.match(server, /command: \["node", "src\/server\.js"\]/);
+  assert.doesNotMatch(server, /postgres_admin_password/);
+  assert.match(worker, /command: \["node", "src\/worker\.js"\]/);
   assert.match(worker, /source: object-data\s+target: \*object_path\s+read_only: true/);
   assert.match(worker, /source: backup-data\s+target: \*backup_path/);
+  assert.match(worker, /healthcheck:\s+disable: true/);
+  assert.match(worker, /sync-server:\s+condition: service_healthy/);
+  assert.doesNotMatch(compose, /npm run|"sh", "-c"/);
+  assert.match(compose, /read_only: true/);
+  assert.match(compose, /user: "10001:10001"/);
+  assert.match(compose, /DP_BACKUP_MASTER_KEY_FILE: \/run\/secrets\/backup_master_key/);
+  assert.match(compose, /postgres_admin_password:\s+environment: DP_POSTGRES_ADMIN_PASSWORD/);
+  assert.match(compose, /postgres_app_password:\s+environment: DP_POSTGRES_APP_PASSWORD/);
+  assert.match(compose, /backup_master_key:\s+environment: DP_BACKUP_MASTER_KEY/);
+  assert.match(server, /source: backup_master_key\s+target: backup_master_key\s+uid: "10001"\s+gid: "10001"\s+mode: 0400/);
+  assert.match(compose, /no-new-privileges:true/);
+  assert.match(compose, /cap_drop:\s+- ALL/);
+  assert.match(compose, /max-size: "10m"/);
+  assert.match(compose, /published: \$\{DP_BIND_PORT:-43822\}/);
+  assert.match(compose, /host_ip: \$\{DP_BIND_ADDRESS:-127\.0\.0\.1\}/);
 }
 
 test('composed server injects health and strict-CSP console assets', async (t) => {
@@ -59,30 +90,27 @@ test('readiness exposes backup health as a distinct component', async (t) => {
   assert.deepEqual(response.json().data, { status: 'degraded', components: { database: 'ok', objects: 'ok', backup: 'degraded' } });
 });
 
-test('example production topology waits for a healthy API and disables worker HTTP health checks', async () => {
+test('source-build production topology is hardened and gates runtime services on database setup', async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const compose = await readFile(path.join(root, 'compose.example.yml'), 'utf8');
-  const worker = compose.slice(compose.indexOf('  backup-worker:'), compose.indexOf('\nvolumes:'));
-  assert.match(worker, /npm run worker/);
-  assertCentralizedRuntimePaths(compose, worker);
-  assert.match(worker, /healthcheck:\s+disable: true/);
-  assert.match(worker, /sync-server:\s+condition: service_healthy/);
-  assert.doesNotMatch(worker, /condition: service_started/);
+  const [compose, dockerfile] = await Promise.all([
+    readFile(path.join(root, 'compose.example.yml'), 'utf8'),
+    readFile(path.join(root, 'Dockerfile'), 'utf8')
+  ]);
+  assertProductionTopology(compose);
+  assert.match(dockerfile, /useradd --uid 10001 --gid dynamic-panel/);
+  assert.match(dockerfile, /USER dynamic-panel/);
+  assert.equal(compose.match(/^  build: \.$/gm)?.length, 1);
+  assert.equal(compose.match(/^  image: dynamic-panel-sync-server:local$/gm)?.length, 1);
+  assert.doesNotMatch(compose, /ghcr\.io/);
 });
 
-test('registry production topology pulls the published image without a local build', async () => {
+test('registry production topology pulls one shared published image without a local build', async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const compose = await readFile(path.join(root, 'compose.image.yml'), 'utf8');
-  const image = 'image: ${DP_SYNC_IMAGE:-ghcr.io/mr-chenh/dynamic-panel-sync-server:latest}';
-  const worker = compose.slice(compose.indexOf('  backup-worker:'), compose.indexOf('\nvolumes:'));
-  assert.equal(compose.split(image).length - 1, 2);
-  assert.equal(compose.match(/pull_policy: always/g)?.length, 2);
+  assertProductionTopology(compose);
+  assert.equal(compose.match(/image: \$\{DP_SYNC_IMAGE:-ghcr\.io\/mr-chenh\/dynamic-panel-sync-server:latest\}/g)?.length, 1);
+  assert.equal(compose.match(/pull_policy: always/g)?.length, 1);
   assert.doesNotMatch(compose, /^\s+build:/m);
-  assert.match(compose, /npm run migrate && npm start/);
-  assert.match(worker, /npm run worker/);
-  assertCentralizedRuntimePaths(compose, worker);
-  assert.match(worker, /healthcheck:\s+disable: true/);
-  assert.match(worker, /sync-server:\s+condition: service_healthy/);
 });
 
 test('account sessions and ClientKey credentials cannot cross route families', async (t) => {

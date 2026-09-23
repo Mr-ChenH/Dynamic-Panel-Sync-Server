@@ -17,6 +17,26 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: dynamic_panel
+          POSTGRES_USER: dynamic_panel_admin
+          POSTGRES_PASSWORD: compose-ci-admin-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dynamic_panel_admin -d dynamic_panel"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SYNC_SETUP_DATABASE_URL: postgresql://dynamic_panel_admin:compose-ci-admin-password@127.0.0.1:5432/dynamic_panel
+      SYNC_SETUP_APP_PASSWORD: "compose CI app password @:/?#[]%"
+      DP_POSTGRES_ADMIN_PASSWORD: compose-validation-admin-password
+      DP_POSTGRES_APP_PASSWORD: compose-validation-app-password
+      DP_BACKUP_MASTER_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,11 +47,10 @@ jobs:
       - run: npm test
       - run: node --check src/server.js
       - run: node --check src/worker.js
+      - run: node --check src/db/setup.js
       - name: Validate Docker Compose files
         run: |
           cp .env.example .env
-          mkdir -p secrets
-          printf 'compose-validation-only\n' > secrets/postgres_password
           docker compose -f compose.example.yml config --quiet
           docker compose -f compose.image.yml config --quiet
 
