@@ -18,6 +18,16 @@ npm start
 
 Development mode uses in-memory identity, records, and object metadata unless adapters are injected. It is for protocol/UI testing only and must not be treated as durable storage.
 
+## Container image
+
+Every successful push to `main` publishes a multi-architecture image to GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/mr-chenh/dynamic-panel-sync-server:latest
+```
+
+Images are available for `linux/amd64` and `linux/arm64`. A push to `main` publishes `latest`, `main`, and `sha-<full-commit>` tags. Pushing a version tag such as `v0.2.0` also publishes `0.2.0` and `0.2` tags.
+
 ## Production order
 
 1. Set unique `COOKIE_SECRET`, `KEY_LOOKUP_SECRET`, and `CURSOR_SECRET` values of at least 32 characters.
