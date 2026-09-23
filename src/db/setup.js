@@ -6,7 +6,7 @@ import { createPool } from './postgres.js';
 const APP_ROLE = 'dynamic_panel_app';
 
 async function roleCommand(pool, template, password) {
-  const result = await pool.query(`SELECT format('${template}', $1) AS sql`, [password]);
+  const result = await pool.query(`SELECT format('${template}', $1::text) AS sql`, [password]);
   await pool.query(result.rows[0].sql);
 }
 
