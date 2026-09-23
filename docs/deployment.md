@@ -8,14 +8,32 @@ The account console authenticates only with the `HttpOnly`, `Secure`, `SameSite=
 
 ## Docker Compose
 
-Create secret files and `.env` from the examples, then run:
+For a registry-backed deployment, create the local configuration and PostgreSQL secret first:
+
+```bash
+cp .env.example .env
+mkdir -p secrets
+openssl rand -hex 32 > secrets/postgres_password
+```
+
+Replace every required empty value in `.env`, then validate, pull, and start the stack:
+
+```bash
+docker compose -f compose.image.yml config
+docker compose -f compose.image.yml pull
+docker compose -f compose.image.yml up -d
+```
+
+`compose.image.yml` pulls `ghcr.io/mr-chenh/dynamic-panel-sync-server:latest` by default and does not require a local source build. For production, set `DP_SYNC_IMAGE` in `.env` to a release tag such as `ghcr.io/mr-chenh/dynamic-panel-sync-server:0.2.0`, or preferably to an immutable digest. Run `docker compose -f compose.image.yml pull` followed by `docker compose -f compose.image.yml up -d` to deploy an updated image.
+
+To build the image from a local source checkout instead, use:
 
 ```bash
 docker compose -f compose.example.yml config
-docker compose -f compose.example.yml up --build
+docker compose -f compose.example.yml up --build -d
 ```
 
-The example binds the API to loopback so a host TLS proxy can front it. It runs a separate `backup-worker` service from the same image and environment; keep exactly one worker replica so a scheduled run is not duplicated. Compose waits for the API container to become healthy before starting the worker, which ensures migrations and server startup have completed, and disables the image's inherited HTTP healthcheck for the worker because it does not listen on an HTTP port. The worker starts one immediate backup, then defaults to 02:00 UTC daily and can be configured with `DP_BACKUP_HOUR_UTC` and `DP_BACKUP_MINUTE_UTC`. Failed immediate or scheduled runs retry after `DP_BACKUP_RETRY_SECONDS` (60 seconds by default, valid range 1-3600); retries continue at that interval until one succeeds, then scheduling returns to the next daily UTC slot. It deliberately uses different volumes for online objects and backups, with the worker mounting online objects read-only. Filesystem backup health reports a same-fault-domain warning until `DP_BACKUP_INDEPENDENT_MEDIA=true` is set after the operator has verified that the backup mount is independent.
+Both examples bind the API to loopback so a host TLS proxy can front it. They run a separate `backup-worker` service from the same image and environment; keep exactly one worker replica so a scheduled run is not duplicated. Compose waits for the API container to become healthy before starting the worker, which ensures migrations and server startup have completed, and disables the image's inherited HTTP healthcheck for the worker because it does not listen on an HTTP port. The worker starts one immediate backup, then defaults to 02:00 UTC daily and can be configured with `DP_BACKUP_HOUR_UTC` and `DP_BACKUP_MINUTE_UTC`. Failed immediate or scheduled runs retry after `DP_BACKUP_RETRY_SECONDS` (60 seconds by default, valid range 1-3600); retries continue at that interval until one succeeds, then scheduling returns to the next daily UTC slot. They deliberately use different volumes for online objects and backups, with the worker mounting online objects read-only. Filesystem backup health reports a same-fault-domain warning until `DP_BACKUP_INDEPENDENT_MEDIA=true` is set after the operator has verified that the backup mount is independent.
 
 ## PostgreSQL
 

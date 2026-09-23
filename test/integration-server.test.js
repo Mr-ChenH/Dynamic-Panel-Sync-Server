@@ -62,6 +62,20 @@ test('example production topology waits for a healthy API and disables worker HT
   assert.doesNotMatch(worker, /condition: service_started/);
 });
 
+test('registry production topology pulls the published image without a local build', async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const compose = await readFile(path.join(root, 'compose.image.yml'), 'utf8');
+  const image = 'image: ${DP_SYNC_IMAGE:-ghcr.io/mr-chenh/dynamic-panel-sync-server:latest}';
+  const worker = compose.slice(compose.indexOf('  backup-worker:'), compose.indexOf('\nvolumes:'));
+  assert.equal(compose.split(image).length - 1, 2);
+  assert.equal(compose.match(/pull_policy: always/g)?.length, 2);
+  assert.doesNotMatch(compose, /^\s+build:/m);
+  assert.match(compose, /npm run migrate && npm start/);
+  assert.match(worker, /npm run worker/);
+  assert.match(worker, /healthcheck:\s+disable: true/);
+  assert.match(worker, /sync-server:\s+condition: service_healthy/);
+});
+
 test('account sessions and ClientKey credentials cannot cross route families', async (t) => {
   const app = await buildServer({ config: config(), logger: false });
   t.after(() => app.close());
