@@ -14,7 +14,7 @@ coverage/
 *.swp
 
 # Runtime data and local secrets
-objects/
-backups/
-secrets/*
-!secrets/.gitkeep
+/objects/
+/backups/
+/secrets/*
+!/secrets/.gitkeep
